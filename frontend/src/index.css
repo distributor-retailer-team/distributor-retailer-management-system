@@ -1,0 +1,27 @@
+
+:root {
+  color: #20243a;
+  background: #f7f8fc;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #8069e6;
+  outline-offset: 2px;
+}
+
+::selection {
+  background: #e1d9ff;
+  color: #30226e;
+}
