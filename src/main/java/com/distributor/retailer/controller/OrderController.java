@@ -1,8 +1,8 @@
-
 package com.distributor.retailer.controller;
 
 import com.distributor.retailer.dto.CreateOrderRequest;
 import com.distributor.retailer.dto.OrderResponse;
+import com.distributor.retailer.dto.OrderSummaryResponse;
 import com.distributor.retailer.entity.Order;
 import com.distributor.retailer.service.OrderService;
 
@@ -50,5 +50,10 @@ public class OrderController {
             @PathVariable Long id,
             @RequestParam Order.OrderStatus status) {
         return orderService.updateOrderStatus(id, status);
+    }
+
+        @GetMapping("/summary")
+    public OrderSummaryResponse getOrderSummary() {
+        return orderService.getOrderSummary();
     }
 }
