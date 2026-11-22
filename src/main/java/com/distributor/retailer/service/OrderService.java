@@ -104,19 +104,10 @@ public class OrderService {
 
             int quantity = entry.getValue();
 
-            if (product.getStockQuantity() < quantity) {
-                throw new IllegalArgumentException(
-                        "Insufficient stock for product: "
-                                + product.getName());
-            }
+          BigDecimal unitPrice = product.getPrice();
 
-            BigDecimal unitPrice = product.getPrice();
-            BigDecimal subtotal = unitPrice.multiply(
-                    BigDecimal.valueOf(quantity));
-
-            product.setStockQuantity(
-                    product.getStockQuantity() - quantity);
-            productRepository.save(product);
+BigDecimal subtotal = unitPrice.multiply(
+        BigDecimal.valueOf(quantity));
 
             OrderItem orderItem = new OrderItem();
             orderItem.setOrder(order);
@@ -169,7 +160,7 @@ public class OrderService {
     @Transactional
     public OrderResponse updateOrderStatus(
             Long id, Order.OrderStatus newStatus) {
-        Order order = orderRepository.findById(id)
+        Order order = orderRepository.findByIdForUpdate(id)
                 .orElseThrow(() ->
                         new IllegalArgumentException(
                                 "Order not found: " + id));
@@ -210,27 +201,61 @@ public class OrderService {
 
             default -> false;
         };
-
         if (!validTransition) {
-            throw new IllegalArgumentException(
+         throw new IllegalArgumentException(
                     "Invalid status transition from "
                             + currentStatus + " to " + newStatus);
         }
 
-        // Restore stock exactly once when an order is cancelled.
-        if (newStatus == Order.OrderStatus.CANCELLED) {
-            List<OrderItem> items =
-                    orderItemRepository.findByOrderId(order.getId());
+    // Deduct stock when a pending order is confirmed.
+if (currentStatus == Order.OrderStatus.PENDING
+        && newStatus == Order.OrderStatus.CONFIRMED) {
 
-            for (OrderItem item : items) {
-                Product product = item.getProduct();
+    List<OrderItem> items =
+            orderItemRepository.findByOrderId(order.getId());
 
-                product.setStockQuantity(
-                        product.getStockQuantity() + item.getQuantity());
+    for (OrderItem item : items) {
 
-                productRepository.save(product);
-            }
+        Product product = productRepository
+                .findByIdForUpdate(item.getProduct().getId())
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Product not found"));
+
+        int quantity = item.getQuantity();
+
+        if (product.getStockQuantity() < quantity) {
+            throw new IllegalArgumentException(
+                    "Insufficient stock for product: "
+                            + product.getName());
         }
+
+        product.setStockQuantity(
+                product.getStockQuantity() - quantity);
+                productRepository.save(product);
+    }
+}
+
+// Restore stock if a confirmed or processing order is cancelled.
+if (newStatus == Order.OrderStatus.CANCELLED
+        && currentStatus != Order.OrderStatus.PENDING) {
+
+    List<OrderItem> items =
+            orderItemRepository.findByOrderId(order.getId());
+
+    for (OrderItem item : items) {
+
+        Product product = productRepository
+                .findByIdForUpdate(item.getProduct().getId())
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Product not found"));
+
+        product.setStockQuantity(
+                product.getStockQuantity() + item.getQuantity());
+                productRepository.save(product);
+    }
+}
 
         order.setStatus(newStatus);
         Order savedOrder = orderRepository.save(order);
