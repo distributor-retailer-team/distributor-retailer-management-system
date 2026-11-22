@@ -1,11 +1,10 @@
-
 package com.distributor.retailer.service;
-
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
-
+import com.distributor.retailer.dto.CreateOrderRequest;
+import org.mockito.ArgumentCaptor;
 import com.distributor.retailer.dto.OrderResponse;
 import com.distributor.retailer.entity.Order;
 import com.distributor.retailer.entity.OrderItem;
@@ -316,7 +315,40 @@ void cancellingPendingOrderDoesNotRestoreStock() {
         verify(productRepository, never()).save(any(Product.class));
         verify(orderRepository, never()).save(any(Order.class));
     }
+@Test
+void confirmingOrderWithMultipleProductsAndInsufficientStockDoesNotDeductAnyStock() {
+    Order order = createOrder(13L, Order.OrderStatus.PENDING);
 
+    Product product1 = createProduct(20L, 10);
+    Product product2 = createProduct(21L, 2);
+
+    OrderItem item1 = createOrderItem(order, product1, 3);
+    OrderItem item2 = createOrderItem(order, product2, 5);
+
+    when(orderRepository.findByIdForUpdate(13L))
+            .thenReturn(Optional.of(order));
+
+    when(orderItemRepository.findByOrderId(13L))
+            .thenReturn(List.of(item1, item2));
+
+    when(productRepository.findByIdForUpdate(20L))
+            .thenReturn(Optional.of(product1));
+
+    when(productRepository.findByIdForUpdate(21L))
+            .thenReturn(Optional.of(product2));
+
+    assertThrows(
+            IllegalArgumentException.class,
+            () -> orderService.updateOrderStatus(
+                    13L, Order.OrderStatus.CONFIRMED)
+    );
+
+    assertEquals(10, product1.getStockQuantity());
+    assertEquals(2, product2.getStockQuantity());
+
+    verify(productRepository, never()).save(any(Product.class));
+    verify(orderRepository, never()).save(any(Order.class));
+}
     @Test
     void cancellingConfirmedOrderRestoresProductStock() {
         Order order = createOrder(9L, Order.OrderStatus.CONFIRMED);
@@ -347,8 +379,80 @@ void cancellingPendingOrderDoesNotRestoreStock() {
         verify(orderRepository).save(order);
         verify(productRepository).save(product);
     }
+@Test
+void cancellingProcessingOrderRestoresProductStock() {
+    Order order = createOrder(14L, Order.OrderStatus.PROCESSING);
 
-    private Order createOrder(long id, Order.OrderStatus initialStatus) {
+    Product product = createProduct(22L, 7);
+    OrderItem item = createOrderItem(order, product, 3);
+
+    when(orderRepository.findByIdForUpdate(14L))
+            .thenReturn(Optional.of(order));
+
+    when(orderItemRepository.findByOrderId(14L))
+            .thenReturn(List.of(item));
+
+    when(productRepository.findByIdForUpdate(22L))
+            .thenReturn(Optional.of(product));
+when(orderRepository.save(any(Order.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    var response = orderService.updateOrderStatus(
+            14L, Order.OrderStatus.CANCELLED);
+
+    assertEquals(Order.OrderStatus.CANCELLED, response.getStatus());
+    assertEquals(10, product.getStockQuantity());
+
+    verify(productRepository).findByIdForUpdate(22L);
+    verify(productRepository).save(product);
+    verify(orderRepository).save(order);
+}@Test
+void createOrderWithInvalidRetailerThrowsException() {
+    CreateOrderRequest request = new CreateOrderRequest();
+    request.setRetailerId(999L);
+
+    when(retailerRepository.findById(999L))
+            .thenReturn(Optional.empty());
+
+    IllegalArgumentException exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> orderService.createOrder(request)
+    );
+    assertEquals("Retailer not found", exception.getMessage());
+
+    verify(orderRepository, never()).save(any(Order.class));
+    verify(orderItemRepository, never()).saveAll(any());
+}
+@Test
+void createOrderWithInvalidProductThrowsException() {
+    Retailer retailer = mock(Retailer.class);
+
+    CreateOrderRequest request = new CreateOrderRequest();
+    request.setRetailerId(1L);
+
+    CreateOrderRequest.OrderItemRequest item =
+            new CreateOrderRequest.OrderItemRequest();
+    item.setProductId(999L);
+    item.setQuantity(2);
+
+    request.setItems(List.of(item));
+
+    when(retailerRepository.findById(1L))
+            .thenReturn(Optional.of(retailer));
+
+    when(orderRepository.save(any(Order.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+
+    when(productRepository.findById(999L))
+            .thenReturn(Optional.empty());
+
+    assertThrows(
+            IllegalArgumentException.class,
+            () -> orderService.createOrder(request)
+    );
+
+    verify(orderItemRepository, never()).saveAll(any());
+}
+private Order createOrder(long id, Order.OrderStatus initialStatus) {
         Order order = mock(Order.class);
         Retailer retailer = mock(Retailer.class);
 

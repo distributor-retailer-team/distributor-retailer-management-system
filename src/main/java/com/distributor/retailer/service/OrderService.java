@@ -155,7 +155,6 @@ BigDecimal subtotal = unitPrice.multiply(
                 .map(this::toResponse)
                 .toList();
     }
-
     @Transactional
     public OrderResponse updateOrderStatus(
             Long id, Order.OrderStatus newStatus) {
@@ -205,57 +204,78 @@ BigDecimal subtotal = unitPrice.multiply(
                     "Invalid status transition from "
                             + currentStatus + " to " + newStatus);
         }
+        // Deduct stock when a pending order is confirmed.
+        if (currentStatus == Order.OrderStatus.PENDING
+                && newStatus == Order.OrderStatus.CONFIRMED) {
 
-    // Deduct stock when a pending order is confirmed.
-if (currentStatus == Order.OrderStatus.PENDING
-        && newStatus == Order.OrderStatus.CONFIRMED) {
+            List<OrderItem> items =
+                    orderItemRepository.findByOrderId(order.getId());
 
-    List<OrderItem> items =
-            orderItemRepository.findByOrderId(order.getId());
+            List<OrderItem> sortedItems = items.stream()
+                    .sorted((a, b) -> Long.compare(
+                            a.getProduct().getId(),
+                            b.getProduct().getId()))
+                    .toList();
 
-    for (OrderItem item : items) {
+            Map<Long, Product> lockedProducts = new HashMap<>();
 
-        Product product = productRepository
-                .findByIdForUpdate(item.getProduct().getId())
-                .orElseThrow(() ->
-                        new IllegalArgumentException(
-                                "Product not found"));
+            // First lock and validate stock for every product.
+            for (OrderItem item : sortedItems) {
+                Long productId = item.getProduct().getId();
 
-        int quantity = item.getQuantity();
+                Product product = productRepository.findByIdForUpdate(productId)
+                        .orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "Product not found: " + productId));
 
-        if (product.getStockQuantity() < quantity) {
-            throw new IllegalArgumentException(
-                    "Insufficient stock for product: "
-                            + product.getName());
+                if (product.getStockQuantity() < item.getQuantity()) {
+                    throw new IllegalArgumentException(
+                            "Insufficient stock for product: "
+                                    + product.getName());
+                }
+
+                lockedProducts.put(productId, product);
+            }
+
+            // Deduct only after every product passes validation.
+            for (OrderItem item : sortedItems) {
+                Product product =
+                        lockedProducts.get(item.getProduct().getId());
+
+                product.setStockQuantity(
+                        product.getStockQuantity() - item.getQuantity());
+               productRepository.save(product);
+         }
         }
+         // Restore stock when a confirmed or processing order is cancelled.
+        if (newStatus == Order.OrderStatus.CANCELLED
+                && (currentStatus == Order.OrderStatus.CONFIRMED
+                || currentStatus == Order.OrderStatus.PROCESSING)) {
 
-        product.setStockQuantity(
-                product.getStockQuantity() - quantity);
-                productRepository.save(product);
-    }
-}
+            List<OrderItem> items =
+                    orderItemRepository.findByOrderId(order.getId());
 
-// Restore stock if a confirmed or processing order is cancelled.
-if (newStatus == Order.OrderStatus.CANCELLED
-        && currentStatus != Order.OrderStatus.PENDING) {
+            List<OrderItem> sortedItems = items.stream()
+                    .sorted((a, b) -> Long.compare(
+                            a.getProduct().getId(),
+                            b.getProduct().getId()))
+                    .toList();
 
-    List<OrderItem> items =
-            orderItemRepository.findByOrderId(order.getId());
+            for (OrderItem item : sortedItems) {
+                Long productId = item.getProduct().getId();
 
-    for (OrderItem item : items) {
+                Product product = productRepository.findByIdForUpdate(productId)
+                        .orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "Product not found: " + productId));
 
-        Product product = productRepository
-                .findByIdForUpdate(item.getProduct().getId())
-                .orElseThrow(() ->
-                        new IllegalArgumentException(
-                                "Product not found"));
-
-        product.setStockQuantity(
-                product.getStockQuantity() + item.getQuantity());
-                productRepository.save(product);
-    }
-}
-
+                product.setStockQuantity(
+                        Math.addExact(
+                                product.getStockQuantity(),
+                                item.getQuantity()));
+                                productRepository.save(product);
+            }
+        }
         order.setStatus(newStatus);
         Order savedOrder = orderRepository.save(order);
 
