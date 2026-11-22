@@ -17,6 +17,11 @@ public class ProductService {
     }
 
     public Product createProduct(Product product) {
+        if (productRepository.existsBySku(product.getSku())) {
+            throw new IllegalArgumentException(
+                    "Product with SKU already exists: " + product.getSku());
+        }
+
         return productRepository.save(product);
     }
 
@@ -24,14 +29,34 @@ public class ProductService {
         return productRepository.findAll();
     }
 
+    public List<Product> searchProducts(String keyword) {
+        if (keyword == null || keyword.isBlank()) {
+            return getAllProducts();
+        }
+
+        String searchTerm = keyword.trim();
+
+        return productRepository
+                .findByNameContainingIgnoreCaseOrSkuContainingIgnoreCase(
+                        searchTerm, searchTerm);
+    }
+
     public Product getProductById(Long id) {
         return productRepository.findById(id)
                 .orElseThrow(() ->
-                        new RuntimeException("Product not found with id: " + id));
+                        new RuntimeException(
+                                "Product not found with id: " + id));
     }
 
     public Product updateProduct(Long id, Product updatedProduct) {
         Product existingProduct = getProductById(id);
+
+        if (productRepository.existsBySkuAndIdNot(
+                updatedProduct.getSku(), id)) {
+            throw new IllegalArgumentException(
+                    "Another product already uses SKU: "
+                            + updatedProduct.getSku());
+        }
 
         existingProduct.setName(updatedProduct.getName());
         existingProduct.setSku(updatedProduct.getSku());
