@@ -14,6 +14,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     // Find all orders placed by a particular retailer
     List<Order> findByRetailerId(Long retailerId);
+    List<Order> findByRetailerIdOrderByOrderDateDesc(Long retailerId);
 
     // Fetch an order with a database-level write lock
     @Lock(LockModeType.PESSIMISTIC_WRITE)

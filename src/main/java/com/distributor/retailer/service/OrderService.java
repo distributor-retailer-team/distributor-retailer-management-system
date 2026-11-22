@@ -150,8 +150,7 @@ BigDecimal subtotal = unitPrice.multiply(
         if (!retailerRepository.existsById(retailerId)) {
             throw new IllegalArgumentException("Retailer not found");
         }
-
-        return orderRepository.findByRetailerId(retailerId)
+               return orderRepository.findByRetailerIdOrderByOrderDateDesc(retailerId)
                 .stream()
                 .map(this::toResponse)
                 .toList();

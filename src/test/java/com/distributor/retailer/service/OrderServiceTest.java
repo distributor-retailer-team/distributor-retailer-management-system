@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.distributor.retailer.dto.OrderResponse;
 import com.distributor.retailer.entity.Order;
 import com.distributor.retailer.entity.OrderItem;
 import com.distributor.retailer.entity.Product;
@@ -65,7 +66,31 @@ class OrderServiceTest {
         );
 
         assertTrue(exception.getMessage().contains("Order not found"));
-    }
+    }@Test
+void getOrdersByRetailerReturnsOrdersLatestFirst() {
+    Order order = createOrder(10L, Order.OrderStatus.PENDING);
+
+    when(retailerRepository.existsById(1L))
+            .thenReturn(true);
+
+    when(orderRepository.findByRetailerIdOrderByOrderDateDesc(1L))
+            .thenReturn(List.of(order));
+
+    when(orderItemRepository.findByOrderId(10L))
+            .thenReturn(List.of());
+
+    List<OrderResponse> responses =
+            orderService.getOrdersByRetailer(1L);
+
+    assertEquals(1, responses.size());
+    assertEquals(
+            Order.OrderStatus.PENDING,
+            responses.get(0).getStatus()
+    );
+
+    verify(orderRepository)
+            .findByRetailerIdOrderByOrderDateDesc(1L);
+}
 
     @Test
     void getOrdersByRetailerWhenRetailerDoesNotExistThrowsException() {
