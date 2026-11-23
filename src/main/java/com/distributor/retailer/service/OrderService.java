@@ -104,19 +104,10 @@ public class OrderService {
 
             int quantity = entry.getValue();
 
-            if (product.getStockQuantity() < quantity) {
-                throw new IllegalArgumentException(
-                        "Insufficient stock for product: "
-                                + product.getName());
-            }
+          BigDecimal unitPrice = product.getPrice();
 
-            BigDecimal unitPrice = product.getPrice();
-            BigDecimal subtotal = unitPrice.multiply(
-                    BigDecimal.valueOf(quantity));
-
-            product.setStockQuantity(
-                    product.getStockQuantity() - quantity);
-            productRepository.save(product);
+BigDecimal subtotal = unitPrice.multiply(
+        BigDecimal.valueOf(quantity));
 
             OrderItem orderItem = new OrderItem();
             orderItem.setOrder(order);
@@ -159,17 +150,15 @@ public class OrderService {
         if (!retailerRepository.existsById(retailerId)) {
             throw new IllegalArgumentException("Retailer not found");
         }
-
-        return orderRepository.findByRetailerId(retailerId)
+               return orderRepository.findByRetailerIdOrderByOrderDateDesc(retailerId)
                 .stream()
                 .map(this::toResponse)
                 .toList();
     }
-
     @Transactional
     public OrderResponse updateOrderStatus(
             Long id, Order.OrderStatus newStatus) {
-        Order order = orderRepository.findById(id)
+        Order order = orderRepository.findByIdForUpdate(id)
                 .orElseThrow(() ->
                         new IllegalArgumentException(
                                 "Order not found: " + id));
@@ -210,28 +199,83 @@ public class OrderService {
 
             default -> false;
         };
-
         if (!validTransition) {
-            throw new IllegalArgumentException(
+         throw new IllegalArgumentException(
                     "Invalid status transition from "
                             + currentStatus + " to " + newStatus);
         }
+        // Deduct stock when a pending order is confirmed.
+        if (currentStatus == Order.OrderStatus.PENDING
+                && newStatus == Order.OrderStatus.CONFIRMED) {
 
-        // Restore stock exactly once when an order is cancelled.
-        if (newStatus == Order.OrderStatus.CANCELLED) {
             List<OrderItem> items =
                     orderItemRepository.findByOrderId(order.getId());
 
-            for (OrderItem item : items) {
-                Product product = item.getProduct();
+            List<OrderItem> sortedItems = items.stream()
+                    .sorted((a, b) -> Long.compare(
+                            a.getProduct().getId(),
+                            b.getProduct().getId()))
+                    .toList();
+
+            Map<Long, Product> lockedProducts = new HashMap<>();
+
+            // First lock and validate stock for every product.
+            for (OrderItem item : sortedItems) {
+                Long productId = item.getProduct().getId();
+
+                Product product = productRepository.findByIdForUpdate(productId)
+                        .orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "Product not found: " + productId));
+
+                if (product.getStockQuantity() < item.getQuantity()) {
+                    throw new IllegalArgumentException(
+                            "Insufficient stock for product: "
+                                    + product.getName());
+                }
+
+                lockedProducts.put(productId, product);
+            }
+
+            // Deduct only after every product passes validation.
+            for (OrderItem item : sortedItems) {
+                Product product =
+                        lockedProducts.get(item.getProduct().getId());
 
                 product.setStockQuantity(
-                        product.getStockQuantity() + item.getQuantity());
+                        product.getStockQuantity() - item.getQuantity());
+               productRepository.save(product);
+         }
+        }
+         // Restore stock when a confirmed or processing order is cancelled.
+        if (newStatus == Order.OrderStatus.CANCELLED
+                && (currentStatus == Order.OrderStatus.CONFIRMED
+                || currentStatus == Order.OrderStatus.PROCESSING)) {
 
-                productRepository.save(product);
+            List<OrderItem> items =
+                    orderItemRepository.findByOrderId(order.getId());
+
+            List<OrderItem> sortedItems = items.stream()
+                    .sorted((a, b) -> Long.compare(
+                            a.getProduct().getId(),
+                            b.getProduct().getId()))
+                    .toList();
+
+            for (OrderItem item : sortedItems) {
+                Long productId = item.getProduct().getId();
+
+                Product product = productRepository.findByIdForUpdate(productId)
+                        .orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "Product not found: " + productId));
+
+                product.setStockQuantity(
+                        Math.addExact(
+                                product.getStockQuantity(),
+                                item.getQuantity()));
+                                productRepository.save(product);
             }
         }
-
         order.setStatus(newStatus);
         Order savedOrder = orderRepository.save(order);
 

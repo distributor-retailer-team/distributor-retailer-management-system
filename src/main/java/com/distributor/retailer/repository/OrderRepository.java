@@ -1,13 +1,23 @@
-
 package com.distributor.retailer.repository;
 
 import com.distributor.retailer.entity.Order;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
 import java.util.List;
+import java.util.Optional;
 
 public interface OrderRepository extends JpaRepository<Order, Long> {
 
+    // Find all orders placed by a particular retailer
     List<Order> findByRetailerId(Long retailerId);
+    List<Order> findByRetailerIdOrderByOrderDateDesc(Long retailerId);
 
-    List<Order> findByStatus(Order.OrderStatus status);
+    // Fetch an order with a database-level write lock
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT o FROM Order o WHERE o.id = :id")
+    Optional<Order> findByIdForUpdate(@Param("id") Long id);
 }
